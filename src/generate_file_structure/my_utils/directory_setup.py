@@ -6,7 +6,7 @@ _DIRECTORY_INITIALIZED = False
 _DIRECTORY_LOCK = threading.Lock()
 
 
-def create_chat_gpt_directory_once(setup_config) -> bool:
+def create_chat_gpt_directory_once(setup_config, logger) -> bool:
     """
     Create the `chat_gpt` working directories exactly once per process.
 
@@ -31,7 +31,11 @@ def create_chat_gpt_directory_once(setup_config) -> bool:
             return False
 
         main_dir = getattr(setup_config, "get_program_output_dir", None)
+        logger.debug(f"Retrieved main_dir from setup_config: {main_dir}")
+
         chunks_dir = getattr(setup_config, "get_chunks_dir", None)
+        logger.debug(f"Retrieved chunks_dir from setup_config: {chunks_dir}")
+
         db_dir = getattr(setup_config, "get_db_dir", None)
         header_dir = getattr(setup_config, "get_custom_header_dir", None)
 

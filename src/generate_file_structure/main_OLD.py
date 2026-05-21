@@ -23,7 +23,6 @@ logger = setup_config.get_logger()
 
 
 # Set of directories to exclude from the file structure
-
 EXCLUDED_PYTHON_DIRS = {
     "__pycache__",
     ".git",
@@ -122,28 +121,17 @@ def create_program_excluded():
         # Test inclusion settings
         ###########################################################################
         if setup_config.get_project_type() == "python":
-            if setup_config.include_tests_flag and "tests" in EXCLUDED_PYTHON_DIRS:
+            if not setup_config.include_tests_flag and "tests" in EXCLUDED_PYTHON_DIRS:
                 EXCLUDED_PYTHON_DIRS.remove("tests")
 
         if setup_config.get_project_type() == "next_js":
-            if setup_config.include_tests_flag and "tests" in EXCLUDED_NEXTJS_DIRS:
+            if not setup_config.include_tests_flag and "tests" in EXCLUDED_NEXTJS_DIRS:
                 EXCLUDED_NEXTJS_DIRS.remove("tests")
 
         # Exclude the output directory by adding its name to EXCLUDED_DIRS
         main_dir = setup_config.get_program_output_dir()
         EXCLUDED_PYTHON_DIRS.add(main_dir.name)
         EXCLUDED_NEXTJS_DIRS.add(main_dir.name)
-
-        # log the excluded directories
-        if setup_config.get_project_type() == "python":
-            logger.info(
-                f"Excluded directories for Python project: {EXCLUDED_PYTHON_DIRS}"
-            )
-
-        if setup_config.get_project_type() == "next_js":
-            logger.info(
-                f"Excluded directories for Next.js project: {EXCLUDED_NEXTJS_DIRS}"
-            )
 
         logger.info(f"Directory '{main_dir}' is ready.")
     except ValueError as e:
@@ -331,7 +319,7 @@ def generate_file_structure():
     """
     lines = ["The File structure for my program is BELOW:\n"]
     py_files_list = []
-    root_dir = setup_config.start_dir  # Changed Code
+    root_dir = setup_config.output_dir
     output_file = setup_config.get_output_file_path()
 
     logger.info("--- Generate File Tree ---")
@@ -352,28 +340,16 @@ def generate_file_structure():
     ###########################################################################
     # Initial prompt to include all directories
     ###########################################################################
-
-    include_all_dir_flag = setup_config.include_all_dir_flag
-
-    if include_all_dir_flag:  # Added Code
-        include_all_response = "y"  # Added Code
-        logger.info(  # Added Code
-            "include_all_dir_flag=True; including all directories without prompting."  # Added Code
-        )  # Added Code
-    else:  # Added Code
-        while True:  # Changed Code
-            include_all_response = (  # Changed Code
-                input("Do you want to include all directories? (y/n): ")
-                .strip()
-                .lower()  # Changed Code
-            )  # Changed Code
-            if include_all_response in {"y", "n"}:  # Changed Code
-                break  # Changed Code
-            else:  # Changed Code
-                logger.info("Invalid input. Please enter 'y' or 'n'.")  # Changed Code
+    while True:
+        include_all_response = (
+            input("Do you want to include all directories? (y/n): ").strip().lower()
+        )
+        if include_all_response in {"y", "n"}:
+            break
+        else:
+            logger.info("Invalid input. Please enter 'y' or 'n'.")
 
     include_all = include_all_response == "y"
-
     ###########################################################################
     # Walk the directory tree
     ###########################################################################
@@ -388,18 +364,20 @@ def generate_file_structure():
         # NOT All Directories - Ask user for each directory
         #######################################################################
         if not include_all:
-            for child in dirs[:]:  # Changed Code
-                child_path = root_path / child  # Added Code
-                if not child_path.is_dir():  # Changed Code
-                    continue  # Changed Code
+            filtered_entries = []
+            for child in entries:
+                if not child.is_dir():
+                    filtered_entries.append(child)
+                    continue
 
-                if child == "tests" and setup_config.include_tests_flag:  # Changed Code
-                    continue  # Changed Code
+                if child.name == "tests" and setup_config.include_tests_flag:
+                    filtered_entries.append(child)
+                    continue
 
                 while True:
                     response = (
                         input(
-                            f"Do you want to include the directory '{child}'? (y/n): "  # Changed Code
+                            f"Do you want to include the directory '{child.name}'? (y/n): "
                         )
                         .strip()
                         .lower()
@@ -409,11 +387,12 @@ def generate_file_structure():
                     logger.info("Invalid input. Please enter 'y' or 'n'.")
 
                 if response == "y":
-                    continue  # Changed Code
+                    filtered_entries.append(child)
                 else:
-                    dirs.remove(child)  # Added Code
-                    excluded_dirs.add(child)  # Changed Code
-                    logger.info(f"Excluded directory: {child}")  # Changed Code
+                    excluded_dirs.add(child.name)
+                    logger.info(f"Excluded directory: {child.name}")
+
+            entries = filtered_entries
         #######################################################################
         # END of loop NOT All Directories
         #######################################################################
@@ -563,9 +542,6 @@ def append_file_contents(py_files):
                 ).as_posix()
                 last_directory = setup_config.output_dir.name
                 file.write(
-                    f"Here is my code for {last_directory}/{relative_py_file} BELOW:\n"
-                )
-                logger.info(
                     f"Here is my code for {last_directory}/{relative_py_file} BELOW:\n"
                 )
 
@@ -769,7 +745,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
-        create_chat_gpt_directory_once(setup_config, logger)
+        create_chat_gpt_directory_once(setup_config)
         main()
         rag_text()
         logger.info("Program DONE!.")

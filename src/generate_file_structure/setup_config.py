@@ -1,5 +1,6 @@
 # src/generate_file_structure/setup_config.py
 
+
 import logging
 import os
 import threading
@@ -15,13 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from generate_file_structure.my_utils.custom_settings_loader import (
     load_custom_settings_once,
 )
-from generate_file_structure.my_utils.directory_setup import (
-    create_chat_gpt_directory_once,
-)
 from generate_file_structure.my_utils.env_loader import load_dotenv_once
 from generate_file_structure.my_utils.llm_loader import get_llm_or_init
 from generate_file_structure.my_utils.logger_setup import setup_logger
-from generate_file_structure.my_utils.path_utils import validate_path
 
 try:
     load_dotenv_once()
@@ -61,83 +58,133 @@ class c_setup_config(BaseModel):
     # Flags
     ###########################################################################
 
-    ################################ Path Flags ################################
+    ################################ Path Flags (read file) ################################
 
     start_dir: Path = Field(
-        default=Path(os.getenv("START_DIR", ".").strip().strip("'\"")),
+        default_factory=lambda: Path(
+            c_setup_config.get_setting_value("START_DIR", ".").strip().strip("'\"")
+        ),
         description="Path to the directory to generate file structure for.",
     )
 
     output_dir: Path = Field(
-        default=Path(os.getenv("OUTPUT_DIR", "./").strip().strip("'\"")),
+        default_factory=lambda: Path(
+            c_setup_config.get_setting_value("OUTPUT_DIR", "./").strip().strip("'\"")
+        ),
         description="Path to the output file for the generated file structure.",
     )
 
     output_file_name: str = Field(
-        default=os.getenv("OUTPUT_FILE_NAME", "generated_file_structure.md"),
+        default_factory=lambda: c_setup_config.get_setting_value(
+            "OUTPUT_FILE_NAME", "generated_file_structure.md"
+        )
+        .strip()
+        .strip("'\""),
         description="Name of the output file for the generated file structure.",
     )
-    ################################ bool Flags ################################
+
+    ################################ bool Flags (read file) ################################
 
     python_project_flag: bool = Field(
-        default_factory=lambda: c_setup_config.env_bool("PYTHON_PROJECT_FLAG", True),
+        default_factory=lambda: c_setup_config.get_setting_bool(
+            "PYTHON_PROJECT_FLAG", True
+        ),
         description="Flag to indicate if the application is running as a Python project.",
     )
 
     next_js_project_flag: bool = Field(
-        default_factory=lambda: c_setup_config.env_bool("NEXT_JS_PROJECT_FLAG", False),
+        default_factory=lambda: c_setup_config.get_setting_bool(
+            "NEXT_JS_PROJECT_FLAG", False
+        ),
         description="Flag to indicate if the application is running as a Next.js project.",
     )
+
+    ################################ string fields (read file) ################################
+
     # CUSTOM_HEADER_NAME
     custom_header_name: str = Field(
-        default=os.getenv("CUSTOM_HEADER_NAME", "custom_header.md"),
+        default_factory=lambda: c_setup_config.get_setting_value(
+            "CUSTOM_HEADER_NAME", "custom_header.md"
+        )
+        .strip()
+        .strip("'\""),
         description="Name of the custom header file to include at the top of the output file.",
     )
 
-    # CUSTOM_HEADER_BEGINNINGNAME
+    # CUSTOM_HEADER_BEGINNING_NAME
     custom_header_beginning_name: str = Field(
-        default=os.getenv("CUSTOM_HEADER_BEGINNING_NAME", "beginning.md"),
+        default_factory=lambda: c_setup_config.get_setting_value(
+            "CUSTOM_HEADER_BEGINNING_NAME", "beginning.md"
+        )
+        .strip()
+        .strip("'\""),
         description="Name of the custom header file to include at the top of the output file.",
     )
-    ################################
-    # OTHERS
-    ################################
+
+    ################################ test fields (read file) ################################
     # include the test directory
     include_tests_flag: bool = Field(
-        default_factory=lambda: c_setup_config.env_bool("INCLUDE_TESTS_FLAG", False),
+        default_factory=lambda: c_setup_config.get_setting_bool(
+            "INCLUDE_TESTS_FLAG", False
+        ),
         description="Flag to indicate if the application should include test directories.",
     )
 
+    # INCLUDE_TESTS_FLAG
+    include_all_dir_flag: bool = Field(
+        default_factory=lambda: c_setup_config.get_setting_bool(
+            "AUTO_INCLUDE_ALL_DIR_FLAG", False
+        ),
+        description="Flag to indicate if the application should include all directories.",
+    )
+
+    ################################ chunk (read file) ################################
+
+    # MAX_CHUNK_SIZE_BYTES = int(os.getenv("MAX_CHUNK_SIZE_BYTES", str(24 * 1024 * 1024)))
+    max_chunk_size_bytes: int = Field(
+        default_factory=lambda: int(
+            c_setup_config.get_setting_value(
+                "MAX_CHUNK_SIZE_BYTES", str(24 * 1024 * 1024)
+            )
+        ),
+        description="Maximum chunk size in bytes for processing large files.",
+    )
+
+    # OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.1")
+    openai_model: str = Field(
+        default_factory=lambda: c_setup_config.get_setting_value(
+            "OPENAI_MODEL", "gpt-5.1"
+        )
+        .strip()
+        .strip("'\""),
+        description="Default OpenAI model to use for LLM interactions.",
+    )
+
+    ################################ testing flags (read file) ################################
+    testing_flag: bool = Field(
+        default_factory=lambda: c_setup_config.get_setting_bool("TESTING_FLAG", False),
+        description="Flag to indicate if the application is running in testing mode.",
+    )
+
+    testing_flag2: bool = Field(
+        default_factory=lambda: c_setup_config.get_setting_bool("TESTING_FLAG2", False),
+        description="Flag to indicate if the application is running in testing mode level 2.",
+    )
+    ################################
+    # OTHERS Not in (read file)
+    ################################
+
     log_prompt_flag: bool = Field(
-        default=False, description="Enable logging of prompts."
+        default_factory=lambda: c_setup_config.get_setting_bool(
+            "LOG_PROMPT_FLAG", False
+        ),
+        description="Enable logging of prompts.",
     )
 
     llm: Optional[ChatOpenAI] = Field(default=None, description="LLM Configuration.")
 
     logger: Optional[logging.Logger] = Field(
         default=None, description="Logger Configuration."
-    )
-
-    # MAX_CHUNK_SIZE_BYTES = int(os.getenv("MAX_CHUNK_SIZE_BYTES", str(24 * 1024 * 1024)))
-    max_chunk_size_bytes: int = Field(
-        default=int(os.getenv("MAX_CHUNK_SIZE_BYTES", str(24 * 1024 * 1024))),
-        description="Maximum chunk size in bytes for processing large files.",
-    )
-
-    # OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.1")
-    openai_model: str = Field(
-        default=os.getenv("OPENAI_MODEL", "gpt-5.1"),
-        description="Default OpenAI model to use for LLM interactions.",
-    )
-
-    testing_flag: bool = Field(
-        default_factory=lambda: c_setup_config.env_bool("TESTING_FLAG", False),
-        description="Flag to indicate if the application is running in testing mode.",
-    )
-
-    testing_flag2: bool = Field(
-        default_factory=lambda: c_setup_config.env_bool("TESTING_FLAG2", False),
-        description="Flag to indicate if the application is running in testing mode level 2.",
     )
 
     ###########################################################################
@@ -160,9 +207,16 @@ class c_setup_config(BaseModel):
     # method for loading custom settings from Custom_setting.md
     # with caching to avoid repeated file reads.
     ##########################################################################
+    # load .env first then load CUSTOM_SETTING_FILE_NAME to override .env
     @classmethod
     def get_custom_settings_path(cls) -> Path:
-        return Path.cwd() / "Custom_setting.md"
+        project_root = Path(__file__).resolve().parents[2]
+        custom_settings_file_name = (
+            os.getenv("CUSTOM_SETTING_FILE_NAME", "custom_setting.md")
+            .strip()
+            .strip("'\"")
+        )
+        return project_root / "custom_setting" / custom_settings_file_name
 
     @classmethod
     def get_custom_settings(cls) -> dict[str, str]:
