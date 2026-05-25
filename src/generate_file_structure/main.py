@@ -1,7 +1,9 @@
 # src/generate_file_structure/main.py
+import io
 import os
 import re
 import sys
+import tokenize
 from datetime import datetime
 from pathlib import Path
 
@@ -355,12 +357,12 @@ def generate_file_structure():
 
     include_all_dir_flag = setup_config.include_all_dir_flag
 
-    if include_all_dir_flag:  # Added Code
-        include_all_response = "y"  # Added Code
-        logger.info(  # Added Code
-            "include_all_dir_flag=True; including all directories without prompting."  # Added Code
-        )  # Added Code
-    else:  # Added Code
+    if include_all_dir_flag:
+        include_all_response = "y"
+        logger.info(
+            "include_all_dir_flag=True; including all directories without prompting."
+        )
+    else:
         while True:  # Changed Code
             include_all_response = (  # Changed Code
                 input("Do you want to include all directories? (y/n): ")
@@ -389,7 +391,7 @@ def generate_file_structure():
         #######################################################################
         if not include_all:
             for child in dirs[:]:  # Changed Code
-                child_path = root_path / child  # Added Code
+                child_path = root_path / child
                 if not child_path.is_dir():  # Changed Code
                     continue  # Changed Code
 
@@ -411,7 +413,7 @@ def generate_file_structure():
                 if response == "y":
                     continue  # Changed Code
                 else:
-                    dirs.remove(child)  # Added Code
+                    dirs.remove(child)
                     excluded_dirs.add(child)  # Changed Code
                     logger.info(f"Excluded directory: {child}")  # Changed Code
         #######################################################################
@@ -486,56 +488,52 @@ def write_directory_tree_to_file(structure_lines):
 ###########################################################################
 def remove_comments_from_code(source_code: str) -> str:
     """
-    Removes all comments from the provided Python source code without altering the original formatting.
+    Removes Python comments from source code while preserving hash characters
+    inside string literals, including triple-quoted Markdown templates.
 
     :param source_code: The original Python source code as a string.
     :type source_code: str
-    :return: The source code without any comments.
+    :return: The source code with real Python comments removed.
     :rtype: str
     """
 
-    # Regex pattern to match comments
-    comment_pattern = re.compile(r"(?<!:)#.*")
+    if not source_code:
+        return ""
 
-    def remove_inline_comment(line: str) -> str:
-        """
-        Removes inline comments from a single line of code.
+    source_lines = source_code.splitlines(keepends=True)
 
-        :param line: A single line of Python code.
-        :type line: str
-        :return: The line without comments.
-        :rtype: str
-        """
-        # Handle cases where '#' is inside a string
-        in_single_quote = False
-        in_double_quote = False
-        escape = False
-        for i, char in enumerate(line):
-            if char == "\\" and not escape:
-                escape = True
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(source_code).readline)
+
+        for token_info in tokens:
+            if token_info.type != tokenize.COMMENT:
                 continue
-            if not escape:
-                if char == "'" and not in_double_quote:
-                    in_single_quote = not in_single_quote
-                elif char == '"' and not in_single_quote:
-                    in_double_quote = not in_double_quote
-                elif char == "#" and not in_single_quote and not in_double_quote:
-                    return line[:i].rstrip()
-            escape = False
-        return line.rstrip()
 
-    cleaned_lines = []
-    for line in source_code.splitlines():
-        stripped_line = line.strip()
-        if stripped_line.startswith("#"):
-            # Skip full-line comments
-            continue
-        else:
-            # Remove inline comments
-            cleaned_line = remove_inline_comment(line)
-            cleaned_lines.append(cleaned_line)
+            start_line_number, start_column = token_info.start
+            line_index = start_line_number - 1
+            original_line = source_lines[line_index]
 
-    return "\n".join(cleaned_lines)
+            newline = ""
+            line_without_newline = original_line
+
+            if original_line.endswith("\r\n"):
+                newline = "\r\n"
+                line_without_newline = original_line[:-2]
+            elif original_line.endswith("\n"):
+                newline = "\n"
+                line_without_newline = original_line[:-1]
+
+            before_comment = line_without_newline[:start_column]
+
+            if before_comment.strip():
+                source_lines[line_index] = before_comment.rstrip() + newline
+            else:
+                source_lines[line_index] = ""
+
+    except tokenize.TokenError:
+        return source_code
+
+    return "".join(source_lines).rstrip()
 
 
 def append_file_contents(py_files):
