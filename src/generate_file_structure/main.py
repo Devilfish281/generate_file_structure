@@ -20,6 +20,7 @@ from generate_file_structure.setup_config import c_setup_config
 
 load_dotenv_once()
 # from asset_processing_service.config import config
+
 setup_config = c_setup_config.get_instance()
 logger = setup_config.get_logger()
 
@@ -44,6 +45,8 @@ EXCLUDED_PYTHON_DIRS = {
 INCLUDED_PYTHON_FILES = {
     ".py",
     ".toml",
+    ".md",
+    ".json",
 }
 INCLUDED_PYTHON_TEST_FILES = {
     ".ini",
@@ -71,6 +74,7 @@ EXCLUDED_NEXTJS_DIRS = {
     "cache",
     ".next",
     "var",
+    ".data",
 }
 
 INCLUDED_NEXTJS_FILES = {
@@ -488,52 +492,116 @@ def write_directory_tree_to_file(structure_lines):
 ###########################################################################
 def remove_comments_from_code(source_code: str) -> str:
     """
-    Removes Python comments from source code while preserving hash characters
-    inside string literals, including triple-quoted Markdown templates.
+    Removes real Python comments while preserving hash characters inside strings.
 
-    :param source_code: The original Python source code as a string.
-    :type source_code: str
-    :return: The source code with real Python comments removed.
-    :rtype: str
+    This keeps Markdown headings such as '# Title' and '## Files' when they are
+    inside triple-quoted strings.
     """
 
     if not source_code:
         return ""
 
-    source_lines = source_code.splitlines(keepends=True)
+    cleaned_lines = []
+    in_triple_quoted_string = False
+    triple_quote_delimiter = ""
 
-    try:
-        tokens = tokenize.generate_tokens(io.StringIO(source_code).readline)
+    def find_next_triple_quote(line: str, start_index: int = 0) -> tuple[int, str]:
+        single_quote_index = line.find("'''", start_index)
+        double_quote_index = line.find('"""', start_index)
 
-        for token_info in tokens:
-            if token_info.type != tokenize.COMMENT:
+        if single_quote_index == -1 and double_quote_index == -1:
+            return -1, ""
+
+        if single_quote_index == -1:
+            return double_quote_index, '"""'
+
+        if double_quote_index == -1:
+            return single_quote_index, "'''"
+
+        if single_quote_index < double_quote_index:
+            return single_quote_index, "'''"
+
+        return double_quote_index, '"""'
+
+    def remove_comment_outside_strings(line: str) -> str:
+        in_single_quoted_string = False
+        in_double_quoted_string = False
+        escape_next_character = False
+        index = 0
+
+        while index < len(line):
+            character = line[index]
+
+            if character == "\\" and not escape_next_character:
+                escape_next_character = True
+                index += 1
                 continue
 
-            start_line_number, start_column = token_info.start
-            line_index = start_line_number - 1
-            original_line = source_lines[line_index]
+            if not escape_next_character:
+                if character == "'" and not in_double_quoted_string:
+                    in_single_quoted_string = not in_single_quoted_string
 
-            newline = ""
-            line_without_newline = original_line
+                elif character == '"' and not in_single_quoted_string:
+                    in_double_quoted_string = not in_double_quoted_string
 
-            if original_line.endswith("\r\n"):
-                newline = "\r\n"
-                line_without_newline = original_line[:-2]
-            elif original_line.endswith("\n"):
-                newline = "\n"
-                line_without_newline = original_line[:-1]
+                elif (
+                    character == "#"
+                    and not in_single_quoted_string
+                    and not in_double_quoted_string
+                ):
+                    return line[:index].rstrip()
 
-            before_comment = line_without_newline[:start_column]
+            escape_next_character = False
+            index += 1
 
-            if before_comment.strip():
-                source_lines[line_index] = before_comment.rstrip() + newline
-            else:
-                source_lines[line_index] = ""
+        return line.rstrip()
 
-    except tokenize.TokenError:
-        return source_code
+    for line in source_code.splitlines():
+        working_index = 0
+        should_keep_entire_line = in_triple_quoted_string
 
-    return "".join(source_lines).rstrip()
+        while True:
+            if in_triple_quoted_string:
+                quote_index = line.find(triple_quote_delimiter, working_index)
+
+                if quote_index == -1:
+                    break
+
+                in_triple_quoted_string = False
+                working_index = quote_index + len(triple_quote_delimiter)
+                should_keep_entire_line = True
+                continue
+
+            quote_index, quote_delimiter = find_next_triple_quote(
+                line,
+                working_index,
+            )
+
+            if quote_index == -1:
+                break
+
+            before_quote = line[:quote_index]
+
+            if "#" in before_quote:
+                break
+
+            in_triple_quoted_string = True
+            triple_quote_delimiter = quote_delimiter
+            working_index = quote_index + len(quote_delimiter)
+            should_keep_entire_line = True
+
+        if should_keep_entire_line:
+            cleaned_lines.append(line.rstrip())
+            continue
+
+        cleaned_line = remove_comment_outside_strings(line)
+
+        if cleaned_line.strip():
+            cleaned_lines.append(cleaned_line)
+        elif line.strip() == "":
+            cleaned_lines.append("")
+
+    return "\n".join(cleaned_lines)
 
 
 def append_file_contents(py_files):
