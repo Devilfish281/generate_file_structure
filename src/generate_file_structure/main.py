@@ -28,6 +28,12 @@ logger = setup_config.get_logger()
 
 # Set of directories to exclude from the file structure
 
+ALWAYS_EXCLUDED_DIRS = {
+    ".git",
+    ".next",
+    "node_modules",
+}
+
 EXCLUDED_PYTHON_DIRS = {
     "__pycache__",
     ".git",
@@ -65,6 +71,7 @@ INCLUDED_PYTHON_TEST_FILES = {
 EXCLUDED_NEXTJS_DIRS = {
     "__pycache__",
     ".git",
+    ".venv",
     "venv",
     "node_modules",
     "file_structure",
@@ -74,16 +81,13 @@ EXCLUDED_NEXTJS_DIRS = {
     "icons",
     "tests",
     "source",
-    ".venv",
     ".next",
     "out",
     "coverage",
     "cache",
-    ".next",
     "var",
     ".data",
 }
-
 
 INCLUDED_NEXTJS_FILES = {
     ".tsx",
@@ -343,18 +347,20 @@ def generate_file_structure():
     ###########################################################################
 
     if setup_config.get_project_type() == "python":
-        excluded_dirs = EXCLUDED_PYTHON_DIRS
+        excluded_dirs = set(EXCLUDED_PYTHON_DIRS)
         included_file_suffixes = set(INCLUDED_PYTHON_FILES)
 
         if setup_config.include_tests_flag:
             included_file_suffixes.update(INCLUDED_PYTHON_TEST_FILES)
 
     else:
-        excluded_dirs = EXCLUDED_NEXTJS_DIRS
+        excluded_dirs = set(EXCLUDED_NEXTJS_DIRS)
         included_file_suffixes = set(INCLUDED_NEXTJS_FILES)
 
         if setup_config.include_tests_flag:
             included_file_suffixes.update(INCLUDED_NEXTJS_TEST_FILES)
+
+    excluded_dirs.update(ALWAYS_EXCLUDED_DIRS)
 
     ###########################################################################
     # Initial prompt to include all directories
@@ -396,8 +402,14 @@ def generate_file_structure():
         # Exclude configured directories and sort traversal
         #######################################################################
 
+        excluded_dirs_lower = {directory.lower() for directory in excluded_dirs}
+
         dirs[:] = sorted(
-            (directory for directory in dirs if directory not in excluded_dirs),
+            (
+                directory
+                for directory in dirs
+                if directory.lower() not in excluded_dirs_lower
+            ),
             key=str.lower,
         )
 
