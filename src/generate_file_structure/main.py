@@ -17,6 +17,7 @@ from generate_file_structure.my_utils.directory_setup import (
 from generate_file_structure.my_utils.env_loader import load_dotenv_once
 from generate_file_structure.my_utils.path_utils import validate_path
 from generate_file_structure.setup_config import c_setup_config
+from generate_file_structure.tree_renderer import render_directory_tree
 
 load_dotenv_once()
 # from asset_processing_service.config import config
@@ -42,12 +43,18 @@ EXCLUDED_PYTHON_DIRS = {
     ".venv",
 }
 # -- Included --
+
+
 INCLUDED_PYTHON_FILES = {
     ".py",
     ".toml",
     ".md",
     ".json",
+    ".yaml",
+    ".yml",
 }
+
+
 INCLUDED_PYTHON_TEST_FILES = {
     ".ini",
 }
@@ -77,6 +84,7 @@ EXCLUDED_NEXTJS_DIRS = {
     ".data",
 }
 
+
 INCLUDED_NEXTJS_FILES = {
     ".tsx",
     ".ts",
@@ -84,7 +92,11 @@ INCLUDED_NEXTJS_FILES = {
     ".json",
     ".md",
     ".mdx",
+    ".yaml",
+    ".yml",
+    ".toml",
 }
+
 
 INCLUDED_NEXTJS_TEST_FILES = {
     ".ini",
@@ -299,59 +311,48 @@ def add_custom_header():
         sys.exit(1)
 
 
-def is_last_item(root_path, dirs, files):
-    """
-    Determines if the current directory is the last item in its parent directory.
-
-    :param root_path: Path object of the current directory.
-    :param dirs: List of subdirectories.
-    :param files: List of files.
-    :return: Boolean indicating if it's the last item.
-    """
-    parent = root_path.parent
-
-    if setup_config.get_project_type() == "python":
-        siblings = [
-            s
-            for s in parent.iterdir()
-            if s.is_dir() and s.name not in EXCLUDED_PYTHON_DIRS
-        ]
-
-    if setup_config.get_project_type() == "next_js":
-        siblings = [
-            s
-            for s in parent.iterdir()
-            if s.is_dir() and s.name not in EXCLUDED_NEXTJS_DIRS
-        ]
-
-    sorted_siblings = sorted(siblings, key=lambda s: s.name)
-    return root_path == sorted_siblings[-1] if siblings else False
-
-
 def generate_file_structure():
     """
-    Generates the directory structure of the given root directory and collects .py files.
+    Generate the directory structure and collect included source files.
 
-    :return: Tuple containing list of directory structure lines and list of .py file paths.
+    The directory tree is collected first and rendered afterward so branch
+    characters are based on the complete sibling list at each tree depth.
+
+    This ensures:
+    - '├──' is used when another sibling follows;
+    - '└──' is used only for the final sibling;
+    - '│   ' is preserved while a parent branch continues.
+
+    :return: Directory-structure lines and included source-file paths.
     :rtype: tuple[list[str], list[Path]]
     """
     lines = ["The File structure for my program is BELOW:\n"]
     py_files_list = []
-    root_dir = setup_config.start_dir  # Changed Code
-    output_file = setup_config.get_output_file_path()
+
+    root_dir = Path(setup_config.start_dir).resolve()
+    output_file = Path(setup_config.get_output_file_path()).resolve()
+
+    children_by_directory: dict[Path, list[Path]] = {}
 
     logger.info("--- Generate File Tree ---")
     logger.info(f"Scanning start path: '{root_dir}'")
     logger.info(f"Writhing to the Output File  {output_file}")
 
+    ###########################################################################
+    # Determine project-specific directory and file settings
+    ###########################################################################
+
     if setup_config.get_project_type() == "python":
         excluded_dirs = EXCLUDED_PYTHON_DIRS
         included_file_suffixes = set(INCLUDED_PYTHON_FILES)
+
         if setup_config.include_tests_flag:
             included_file_suffixes.update(INCLUDED_PYTHON_TEST_FILES)
+
     else:
         excluded_dirs = EXCLUDED_NEXTJS_DIRS
         included_file_suffixes = set(INCLUDED_NEXTJS_FILES)
+
         if setup_config.include_tests_flag:
             included_file_suffixes.update(INCLUDED_NEXTJS_TEST_FILES)
 
@@ -363,110 +364,133 @@ def generate_file_structure():
 
     if include_all_dir_flag:
         include_all_response = "y"
+
         logger.info(
-            "include_all_dir_flag=True; including all directories without prompting."
+            "include_all_dir_flag=True; " "including all directories without prompting."
         )
+
     else:
-        while True:  # Changed Code
-            include_all_response = (  # Changed Code
-                input("Do you want to include all directories? (y/n): ")
-                .strip()
-                .lower()  # Changed Code
-            )  # Changed Code
-            if include_all_response in {"y", "n"}:  # Changed Code
-                break  # Changed Code
-            else:  # Changed Code
-                logger.info("Invalid input. Please enter 'y' or 'n'.")  # Changed Code
+        while True:
+            include_all_response = (
+                input("Do you want to include all directories? (y/n): ").strip().lower()
+            )
+
+            if include_all_response in {"y", "n"}:
+                break
+
+            logger.info("Invalid input. Please enter 'y' or 'n'.")
 
     include_all = include_all_response == "y"
 
     ###########################################################################
-    # Walk the directory tree
+    # Walk directory tree and collect complete sibling lists
     ###########################################################################
-    for root, dirs, files in os.walk(root_dir):
-        # Convert to Path object for easier manipulation
-        root_path = Path(root)
 
-        # Exclude specified directories
-        dirs[:] = [d for d in dirs if d not in excluded_dirs]
+    for root, dirs, files in os.walk(
+        root_dir,
+        topdown=True,
+    ):
+        root_path = Path(root).resolve()
+
+        #######################################################################
+        # Exclude configured directories and sort traversal
+        #######################################################################
+
+        dirs[:] = sorted(
+            (directory for directory in dirs if directory not in excluded_dirs),
+            key=str.lower,
+        )
 
         #######################################################################
         # NOT All Directories - Ask user for each directory
         #######################################################################
-        if not include_all:
-            for child in dirs[:]:  # Changed Code
-                child_path = root_path / child
-                if not child_path.is_dir():  # Changed Code
-                    continue  # Changed Code
 
-                if child == "tests" and setup_config.include_tests_flag:  # Changed Code
-                    continue  # Changed Code
+        if not include_all:
+            for child in dirs[:]:
+                child_path = root_path / child
+
+                if not child_path.is_dir():
+                    continue
+
+                if child == "tests" and setup_config.include_tests_flag:
+                    continue
 
                 while True:
                     response = (
                         input(
-                            f"Do you want to include the directory '{child}'? (y/n): "  # Changed Code
+                            f"Do you want to include the "
+                            f"directory '{child}'? (y/n): "
                         )
                         .strip()
                         .lower()
                     )
+
                     if response in {"y", "n"}:
                         break
-                    logger.info("Invalid input. Please enter 'y' or 'n'.")
+
+                    logger.info("Invalid input. " "Please enter 'y' or 'n'.")
 
                 if response == "y":
-                    continue  # Changed Code
-                else:
-                    dirs.remove(child)
-                    excluded_dirs.add(child)  # Changed Code
-                    logger.info(f"Excluded directory: {child}")  # Changed Code
-        #######################################################################
-        # END of loop NOT All Directories
-        #######################################################################
+                    continue
+
+                dirs.remove(child)
+                excluded_dirs.add(child)
+
+                logger.info(f"Excluded directory: {child}")
 
         #######################################################################
-        # Compute the level by relative parts
+        # Collect visible files
         #######################################################################
-        try:
-            relative_path = root_path.relative_to(root_dir)
-            level = len(relative_path.parts)
-        except ValueError:
-            # In case root_path is same as root_dir
-            level = 0
 
-        indent = "    " * level
+        visible_files: list[Path] = []
 
-        # Get directory name
-        dir_name = root_path.name if root_path != root_dir else str(root_path.resolve())
+        for filename in sorted(
+            files,
+            key=str.lower,
+        ):
+            file_path = root_path / filename
 
-        # Determine branch symbol
-        branch = "└── " if is_last_item(root_path, dirs, files) else "├── "
-        lines.append(f"{indent}{branch}{dir_name}/\n")
+            ###################################################################
+            # Exclude generated output file
+            ###################################################################
 
-        # Prepare indentation for files
-        if is_last_item(root_path, dirs, files):
-            sub_indent = indent + "    "
-        else:
-            sub_indent = indent + "    "
-
-        # Sort files for consistent ordering
-        files = sorted(files)
-
-        ###########################################################################
-        # Process files in the current directory
-        ###########################################################################
-        for idx, f in enumerate(files):
-            # Exclude the running script and the output file
-            file_path = root_path / f
-            if file_path.resolve() == output_file.resolve():
+            if file_path.resolve() == output_file:
                 continue
 
-            # Collect included files for later processing
-            if file_path.suffix in included_file_suffixes:
-                py_files_list.append(file_path)
+            visible_files.append(file_path.resolve())
 
-            file_branch = "└── " if idx == len(files) - 1 else "├── "
-            lines.append(f"{sub_indent}{file_branch}{f}\n")
+            ###################################################################
+            # Collect included source files for append_file_contents()
+            ###################################################################
+
+            if file_path.suffix.lower() in included_file_suffixes:
+                py_files_list.append(file_path.resolve())
+
+        #######################################################################
+        # Collect visible child directories
+        #######################################################################
+
+        visible_directories = [(root_path / directory).resolve() for directory in dirs]
+
+        #######################################################################
+        # Preserve existing display order:
+        #
+        # files first
+        # directories second
+        #######################################################################
+
+        children_by_directory[root_path] = visible_files + visible_directories
+
+    ###########################################################################
+    # Render the complete tree
+    ###########################################################################
+
+    lines.extend(
+        render_directory_tree(
+            root_dir,
+            children_by_directory,
+        )
+    )
 
     return lines, py_files_list
 
@@ -604,73 +628,182 @@ def remove_comments_from_code(source_code: str) -> str:
     return "\n".join(cleaned_lines)
 
 
+def prepare_file_content(source_path: Path, source_code: str) -> str:
+    """
+    Prepare one source file for inclusion in the generated report.
+
+    Python files keep the existing behavior:
+    - preserve the first line;
+    - remove Python comments from the remaining source.
+
+    Every non-Python file is returned exactly as read. This prevents Markdown,
+    JSON, YAML, TOML, TypeScript, CSS, and other text files from being passed
+    through the Python comment-removal logic.
+
+    :param source_path: Path to the source file.
+    :type source_path: Path
+    :param source_code: Original source-file contents.
+    :type source_code: str
+    :return: Content to place in the generated report.
+    :rtype: str
+    """
+    if source_path.suffix.lower() != ".py":
+        return source_code
+
+    if not source_code:
+        return ""
+
+    lines = source_code.splitlines()
+    first_line = lines[0]
+    rest_of_code = "\n".join(lines[1:])
+
+    cleaned_rest = remove_comments_from_code(rest_of_code)
+
+    if not first_line.endswith("\n"):
+        first_line += "\n"
+
+    return first_line + cleaned_rest
+
+
+def get_markdown_language(source_path: Path) -> str:
+    """
+    Return the Markdown fenced-code language identifier for a source file.
+
+    :param source_path: Path to the source file.
+    :type source_path: Path
+    :return: Markdown language identifier.
+    :rtype: str
+    """
+    language_by_suffix = {
+        ".py": "python",
+        ".md": "markdown",
+        ".mdx": "markdown",
+        ".json": "json",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".toml": "toml",
+        ".ini": "ini",
+        ".ts": "typescript",
+        ".tsx": "tsx",
+        ".css": "css",
+    }
+
+    return language_by_suffix.get(
+        source_path.suffix.lower(),
+        "text",
+    )
+
+
+def get_safe_markdown_fence(source_code: str) -> str:
+    """
+    Return an outer Markdown code fence that cannot be closed accidentally
+    by a backtick fence contained inside the source file.
+
+    :param source_code: Source-file contents.
+    :type source_code: str
+    :return: Safe Markdown fence.
+    :rtype: str
+    """
+    backtick_runs = re.findall(r"`+", source_code)
+
+    longest_backtick_run = max(
+        (len(run) for run in backtick_runs),
+        default=0,
+    )
+
+    return "`" * max(3, longest_backtick_run + 1)
+
+
 def append_file_contents(py_files):
     """
-    Appends the contents of each .py file to the output file with a header and enhances readability.
-    Preserves the first line of the file and removes all comments from the rest of the code.
+    Append included source files to the generated report.
 
-    :param output_file: The path to the output file.
-    :type output_file: Path
-    :param py_files: List of paths to .py files.
+    Python files have Python comments removed using the existing Python-only
+    cleaning behavior.
+
+    Every non-Python source file is copied exactly as read. This preserves
+    Markdown headings, JSON values containing '#', YAML comments, TOML
+    comments, and all other non-Python source text.
+
+    Each source file is wrapped in a dynamically sized Markdown fence so
+    embedded Markdown code fences cannot accidentally terminate the outer
+    generated-report block.
+
+    :param py_files: List of source-file paths to append.
     :type py_files: list[Path]
     """
     try:
-        with setup_config.get_output_file_path().open("a", encoding="utf-8") as file:
+        with setup_config.get_output_file_path().open(
+            "a",
+            encoding="utf-8",
+        ) as file:
             for py_file in py_files:
                 separator = "########################################"
-                # Write the first separator and header
+
                 file.write(f"\n{separator}\n")
-                # output_dir C:/Users/ME/Documents/Python/2026/Projects/test_program_file_structure
-                # py_file is C:/Users/ME/Documents/Python/2026/Projects/test_program_file_structure/tests/test_text_utils.py
-                # I want write 'test_program_file_structure/tests/test_text_utils.py'
 
                 relative_py_file = py_file.relative_to(
                     setup_config.output_dir
                 ).as_posix()
+
                 last_directory = setup_config.output_dir.name
+
                 file.write(
-                    f"Here is my code for {last_directory}/{relative_py_file} BELOW:\n"
-                )
-                logger.info(
-                    f"Here is my code for {last_directory}/{relative_py_file} BELOW:\n"
+                    f"Here is my code for "
+                    f"{last_directory}/{relative_py_file} BELOW:\n"
                 )
 
-                # file.write(f"Here is my code for {py_file.name} BELOW:\n")
-                # Write the second separator
+                logger.info(
+                    f"Here is my code for "
+                    f"{last_directory}/{relative_py_file} BELOW:\n"
+                )
+
                 file.write(f"{separator}\n\n")
-                # Start of Markdown code block
-                file.write(f"```python\n")
+
                 try:
                     with py_file.open("r", encoding="utf-8") as py_f:
                         source_code = py_f.read()
-                        if not source_code:
-                            cleaned_code = ""
-                        else:
-                            lines = source_code.splitlines()
-                            first_line = lines[0]
-                            rest_of_code = "\n".join(lines[1:])
-                            # Remove all comments from the rest of the code
-                            cleaned_rest = remove_comments_from_code(rest_of_code)
-                            # Ensure the first line ends with a newline
-                            if not first_line.endswith("\n"):
-                                first_line += "\n"
-                            cleaned_code = first_line + cleaned_rest
-                        file.write(cleaned_code)
+
+                    prepared_code = prepare_file_content(
+                        py_file,
+                        source_code,
+                    )
+
+                    markdown_language = get_markdown_language(py_file)
+
+                    markdown_fence = get_safe_markdown_fence(prepared_code)
+
+                    file.write(f"{markdown_fence}{markdown_language}\n")
+
+                    file.write(prepared_code)
+
+                    if prepared_code and not prepared_code.endswith("\n"):
+                        file.write("\n")
+
+                    file.write(f"{markdown_fence}\n")
+
                 except UnicodeDecodeError:
                     file.write(
-                        f"# Could not decode file {py_file} with UTF-8 encoding.\n\n"
+                        "```text\n"
+                        f"# Could not decode file {py_file} "
+                        "with UTF-8 encoding.\n"
+                        "```\n"
                     )
+
                 except IOError as e:
-                    file.write(f"# Could not read file {py_file}: {e}\n\n")
-                # End of Markdown code block
-                file.write(f"```\n")
+                    file.write(
+                        "```text\n" f"# Could not read file {py_file}: {e}\n" "```\n"
+                    )
+
         logger.info(
-            f"Python file contents appended to '{setup_config.get_output_file_path()}'."
+            f"Source file contents appended to "
+            f"'{setup_config.get_output_file_path()}'."
         )
+
     except IOError as e:
-        logger.info(
-            f"An error occurred while appending to '{setup_config.get_output_file_path()}': {e}",
-            file=sys.stderr,
+        logger.error(
+            f"An error occurred while appending to "
+            f"'{setup_config.get_output_file_path()}': {e}"
         )
 
 
